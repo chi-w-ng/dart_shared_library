@@ -6,3 +6,4 @@ depot_tools/*
 out/*
 .vs
 **/.DS_Store
+depot_tools/

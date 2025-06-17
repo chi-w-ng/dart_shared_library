@@ -26,6 +26,7 @@ double dotX = 0;
 double dotY = 0;
 bool movingLeft = true;
 
+@pragma("vm:entry-point")
 void main() {
   print('main');
   walls.add(
@@ -48,6 +49,7 @@ void main() {
   drawable.ref.color.b = 0.0;
 }
 
+@pragma("vm:entry-point")
 void frame(double dt) {
   if (movingLeft) {
     dotX -= (speed * dt);

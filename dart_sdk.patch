@@ -1,23 +1,23 @@
 diff --git a/BUILD.gn b/BUILD.gn
-index 3dd681d9d41..a8e43bc5953 100644
+index fb3ca5fc537..9760a092244 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -100,6 +100,10 @@ group("create_sdk") {
-   public_deps = [ "sdk:create_sdk" ]
+@@ -127,6 +127,10 @@ group("create_platform_sdk") {
+   public_deps = [ "sdk:create_platform_sdk" ]
  }
  
 +group("libdart") {
 +  deps = [ "runtime/bin:libdart" ]
 +}
 +
- group("create_platform_sdk") {
-   public_deps = [ "sdk:create_platform_sdk" ]
- }
+ group("dart2js") {
+   import("runtime/runtime_args.gni")
+   if (dart_target_arch != "ia32" && dart_target_arch != "x86") {
 diff --git a/build/config/compiler/BUILD.gn b/build/config/compiler/BUILD.gn
-index 29ada988abb..2e4cf4ea9c8 100644
+index b77bab8676c..b9739fab43a 100644
 --- a/build/config/compiler/BUILD.gn
 +++ b/build/config/compiler/BUILD.gn
-@@ -260,8 +260,9 @@ config("compiler") {
+@@ -254,8 +254,9 @@ config("compiler") {
        cflags += [ "-fPIC" ]
        ldflags += [ "-fPIC" ]
      } else {
@@ -30,12 +30,12 @@ index 29ada988abb..2e4cf4ea9c8 100644
    }
  
 diff --git a/runtime/bin/BUILD.gn b/runtime/bin/BUILD.gn
-index be0893506f2..7c5bb919ad4 100644
+index 57d7006036d..fd677355210 100644
 --- a/runtime/bin/BUILD.gn
 +++ b/runtime/bin/BUILD.gn
-@@ -1170,3 +1170,47 @@ if (defined(is_linux) && is_linux && defined(is_asan) && is_asan &&
-     }
-   }
+@@ -1224,3 +1224,47 @@ static_library("dart_embedder_runtime_jit") {
+   output_name = "dart_embedder_runtime_jit"
+   deps = [ ":dart_embedder_runtime_jit_set" ]
  }
 +
 +static_library("libdart") {

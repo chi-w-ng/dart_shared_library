@@ -183,7 +183,6 @@ Dart_Isolate CreateIsolate(bool is_main_isolate,
   uint8_t* kernel_buffer = nullptr;
   intptr_t kernel_buffer_size;
   AppSnapshot* app_snapshot = nullptr;
-  std::shared_ptr<uint8_t> kernel_buffer_ptr;
 
   bool isolate_run_app_snapshot = false;
   const uint8_t* isolate_snapshot_data = kDartCoreIsolateSnapshotData;
@@ -212,8 +211,7 @@ Dart_Isolate CreateIsolate(bool is_main_isolate,
 
   if (kernel_buffer == nullptr && !isolate_run_app_snapshot) {
     dfe.ReadScript(script_uri, app_snapshot, &kernel_buffer,
-                   &kernel_buffer_size, /*decode_uri=*/true,
-                   &kernel_buffer_ptr);
+                   &kernel_buffer_size, /*decode_uri=*/true);
   }
 
   flags->null_safety = true;

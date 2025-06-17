@@ -30,7 +30,7 @@ target_include_directories(realtime_example PRIVATE
 if(LINUX)
 	# -export-dynamic is required on Linux if your symbols are in your executable,
 	# otherwise dlsym (and therefore Dart FFI) can't find them.
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -export-dynamic")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-export-dynamic")
 endif()
 
 if (WIN32)

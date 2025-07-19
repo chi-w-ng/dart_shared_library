@@ -5,6 +5,24 @@
 
 using namespace dart::bin;
 
+class EmbeddedSnapshot {
+ public:
+  static const uint8_t* embedded_vm_snapshot_binary_data;
+  static const uint8_t* embedded_isolate_snapshot_binary_data;
+};
+
+class NullByte {
+ public:
+  // Getter for the static null byte (const pointer)
+  static const uint8_t* get() {
+    static const uint8_t null_byte = '\0';
+    return &null_byte;
+  }
+
+  // Disallow instantiation
+  NullByte() = delete;
+};
+
 Dart_Isolate CreateKernelIsolate(const char* script_uri,
                                  const char* main,
                                  const char* package_root,

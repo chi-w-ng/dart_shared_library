@@ -1,10 +1,7 @@
 #include "isolate_setup.h"
-
 #include <iostream>
-
 #include <include/dart_api.h>
 #include <include/dart_embedder_api.h>
-
 #include <bin/builtin.h>
 #include <bin/dartutils.h>
 #include <bin/dfe.h>
@@ -13,12 +10,40 @@
 #include <bin/snapshot_utils.h>
 #include <bin/vmservice_impl.h>
 #include <platform/utils.h>
+#include <fstream>
+#include <vector>
+#include <filesystem>
+#include "isolate_snapshot_data.inc"  // Large file here
+#include "vm_snapshot_data.inc"
+
+const uint8_t* EmbeddedSnapshot::embedded_isolate_snapshot_binary_data =
+    isolate_snapshot_binary_data;
+const uint8_t* EmbeddedSnapshot::embedded_vm_snapshot_binary_data =
+    vm_snapshot_binary_data;
 
 using namespace dart::bin;
+namespace fs = std::filesystem;
 
-extern "C" {
-extern const uint8_t kDartCoreIsolateSnapshotData[];
-extern const uint8_t kDartCoreIsolateSnapshotInstructions[];
+static fs::path get_folder_from_path(const fs::path& script_uri) {
+  return script_uri.parent_path();  // Extracts directory
+}
+
+// reads isolate_snapshot_data.bin file for core isolate snapshot data
+static std::vector<uint8_t> loadIsolateSnapshotData(const std::string& filepath) {
+  // 1. Open file at end to immediately get size
+  std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return {};
+  }
+  // 2. Get size and pre-allocate vector (critical for performance)
+  const auto size = file.tellg();
+  file.seekg(0);
+  std::vector<uint8_t> buffer(size);
+  // 3. Single bulk read (fastest method)
+  if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
+    return {};
+  }
+  return buffer;
 }
 
 namespace {
@@ -30,6 +55,7 @@ class DllIsolateGroupData : public IsolateGroupData {
                       bool isolate_run_app_snapshot,
                       void* callback_data = nullptr)
       : IsolateGroupData(url,
+                         nullptr,  // asset_resolution_base
                          packages_file,
                          app_snapshot,
                          isolate_run_app_snapshot),
@@ -51,7 +77,7 @@ Dart_Handle SetupCoreLibraries(Dart_Isolate isolate,
   // Prepare builtin and other core libraries for use to resolve URIs.
   // Set up various closures, e.g: printing, timers etc.
   // Set up package configuration for URI resolution.
-  result = DartUtils::PrepareForScriptLoading(false, true);
+  result = DartUtils::PrepareForScriptLoading(false, true, true);
   if (Dart_IsError(result)) return result;
 
   // Setup packages config if specified.  
@@ -143,9 +169,8 @@ Dart_Isolate CreateVmServiceIsolate(const char* script_uri,
   IsolateData* isolate_data = new IsolateData(isolate_group_data);
 
   flags->load_vmservice_library = true;
-  const uint8_t* isolate_snapshot_data = kDartCoreIsolateSnapshotData;
-  const uint8_t* isolate_snapshot_instructions =
-      kDartCoreIsolateSnapshotInstructions;
+  const uint8_t* isolate_snapshot_data = nullptr;
+  const uint8_t* isolate_snapshot_instructions = nullptr;
 
   dart::embedder::IsolateCreationData data = {script_uri, main, flags,
                                               isolate_group_data, isolate_data};
@@ -175,19 +200,18 @@ Dart_Isolate CreateVmServiceIsolate(const char* script_uri,
 Dart_Isolate CreateIsolate(bool is_main_isolate,
                            const char* script_uri,
                            const char* name,
-                           const char* packages_config,
+                           const char* package_config,
                            Dart_IsolateFlags* flags,
                            void* callback_data,
                            char** error) {
   Dart_Handle result;
   uint8_t* kernel_buffer = nullptr;
-  intptr_t kernel_buffer_size;
+  intptr_t kernel_buffer_size = 0;
   AppSnapshot* app_snapshot = nullptr;
-
+  
   bool isolate_run_app_snapshot = false;
-  const uint8_t* isolate_snapshot_data = kDartCoreIsolateSnapshotData;
-  const uint8_t* isolate_snapshot_instructions =
-      kDartCoreIsolateSnapshotInstructions;
+  const uint8_t* isolate_snapshot_data = EmbeddedSnapshot::embedded_isolate_snapshot_binary_data;
+  const uint8_t* isolate_snapshot_instructions = NullByte::get();
 
   if (!is_main_isolate) {
     app_snapshot = Snapshot::TryReadAppSnapshot(script_uri);
@@ -208,19 +232,25 @@ Dart_Isolate CreateIsolate(bool is_main_isolate,
           &isolate_snapshot_data, &isolate_snapshot_instructions);
     }
   }
-
+  
   if (kernel_buffer == nullptr && !isolate_run_app_snapshot) {
-    dfe.ReadScript(script_uri, app_snapshot, &kernel_buffer,
-                   &kernel_buffer_size, /*decode_uri=*/true);
+    int exit_code = 0;
+    dfe.ReadScript(script_uri, 
+                    app_snapshot, 
+                    &kernel_buffer,
+                   &kernel_buffer_size, 
+                    true);
   }
-
+  if (kernel_buffer == nullptr &&
+      kernel_buffer_size < 0) {
+    kernel_buffer_size = 0;
+  }
   flags->null_safety = true;
 
   DllIsolateGroupData* isolate_group_data = new DllIsolateGroupData(
-      script_uri, packages_config, nullptr, false, callback_data);
+      script_uri, package_config, nullptr, false, callback_data);
   isolate_group_data->SetKernelBufferNewlyOwned(kernel_buffer,
                                                 kernel_buffer_size);
-
   const uint8_t* platform_kernel_buffer = nullptr;
   intptr_t platform_kernel_buffer_size = 0;
   dfe.LoadPlatform(&platform_kernel_buffer, &platform_kernel_buffer_size);
@@ -228,12 +258,17 @@ Dart_Isolate CreateIsolate(bool is_main_isolate,
     platform_kernel_buffer = kernel_buffer;
     platform_kernel_buffer_size = kernel_buffer_size;
   }
-
+  Dart_Isolate isolate = nullptr;
   IsolateData* isolate_data = new IsolateData(isolate_group_data);
-  Dart_Isolate isolate = Dart_CreateIsolateGroupFromKernel(
-      script_uri, name, platform_kernel_buffer, platform_kernel_buffer_size,
-      flags, isolate_group_data, isolate_data, error);
-
+  if (isolate_snapshot_data && isolate_snapshot_instructions) {
+    isolate = Dart_CreateIsolateGroup(script_uri, name, isolate_snapshot_data,
+                                      isolate_snapshot_instructions, flags,
+                                      isolate_group_data, isolate_data, error);
+  } else {
+    isolate = Dart_CreateIsolateGroupFromKernel(
+        script_uri, name, platform_kernel_buffer, platform_kernel_buffer_size,
+        flags, isolate_group_data, isolate_data, error);
+   }
   if (isolate == nullptr) {
     std::cerr << "Error creating isolate " << name << ": " << *error
               << std::endl;

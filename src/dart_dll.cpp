@@ -1,8 +1,11 @@
 #include <iostream>
+
 #include "dart_dll.h"
 #include "isolate_setup.h"
+
 #include <include/dart_api.h>
 #include <include/dart_embedder_api.h>
+
 #include <bin/dartutils.h>
 #include <bin/dfe.h>
 #include <bin/file.h>
@@ -15,6 +18,18 @@ using namespace dart::bin;
 using namespace dart;
 
 static DartDllConfig _dart_dll_config;
+
+extern "C" {
+extern const uint8_t kDartVmSnapshotData[];
+extern const uint8_t kDartVmSnapshotInstructions[];
+}
+
+namespace dart {
+namespace bin {
+extern unsigned int observatory_assets_archive_len;
+extern const uint8_t* observatory_assets_archive;
+}  // namespace bin
+}  // namespace dart
 
 static bool FileModifiedCallback(const char* url, int64_t since) {
   auto path = File::UriToPath(url);
@@ -29,6 +44,18 @@ static bool FileModifiedCallback(const char* url, int64_t since) {
     return true;
   }
   return data[File::kModifiedTime] > since;
+}
+
+Dart_Handle GetVMServiceAssetsArchiveCallback() {
+  uint8_t* decompressed = NULL;
+  intptr_t decompressed_len = 0;
+  Decompress(observatory_assets_archive, observatory_assets_archive_len,
+             &decompressed, &decompressed_len);
+  Dart_Handle tar_file =
+      DartUtils::MakeUint8Array(decompressed, decompressed_len);
+  // Free decompressed memory as it has been copied into a Dart array.
+  free(decompressed);
+  return tar_file;
 }
 
 static Dart_Isolate CreateIsolateGroupAndSetup(const char* script_uri,
@@ -55,7 +82,7 @@ static Dart_Isolate CreateIsolateGroupAndSetup(const char* script_uri,
   return isolate;
 }
 
-static bool OnIsolateInitialize(void** child_callback_data, char** error) {
+bool OnIsolateInitialize(void** child_callback_data, char** error) {
   Dart_Isolate isolate = Dart_CurrentIsolate();
   assert(isolate != nullptr);
 
@@ -133,33 +160,23 @@ bool DartDll_Initialize(const DartDllConfig& config) {
 
   Dart_InitializeParams params = {};
   params.version = DART_INITIALIZE_PARAMS_CURRENT_VERSION;
-  // is snapshot use for hot reload or is it a aot thing?
-  params.vm_snapshot_data = EmbeddedSnapshot::embedded_vm_snapshot_binary_data;
-  params.vm_snapshot_instructions = NullByte::get();
+  params.vm_snapshot_data = kDartVmSnapshotData;
+  params.vm_snapshot_instructions = kDartVmSnapshotInstructions;
   params.create_group = CreateIsolateGroupAndSetup;
   params.initialize_isolate = OnIsolateInitialize;
   params.shutdown_isolate = OnIsolateShutdown;
   params.cleanup_isolate = DeleteIsolateData;
   params.cleanup_group = DeleteIsolateGroupData;
-  params.file_open = DartUtils::OpenFile;
-  params.file_read = DartUtils::ReadFile;
-  params.file_write = DartUtils::WriteFile;
-  params.file_close = DartUtils::CloseFile;
   params.entropy_source = DartUtils::EntropySource;
-  // deprecated, has no effect (from documentation)
-  params.get_service_assets = nullptr;
+  params.get_service_assets = GetVMServiceAssetsArchiveCallback;
   params.start_kernel_isolate =
       dfe.UseDartFrontend() && dfe.CanUseDartFrontend();
 
   char* initError = Dart_Initialize(&params);
-  if (initError) {
-    std::cout << "Dart VM initialized, error was: "
-              << (initError != nullptr ? initError : "null") << std::endl;
-    return false;
-  } else {
-    std::cout << "Dart VM initialized" << std::endl;
-  }
- 
+
+  std::cout << "Dart initialized, error was: "
+            << (initError != nullptr ? initError : "null") << std::endl;
+
   Dart_SetFileModifiedCallback(&FileModifiedCallback);
 
   return true;

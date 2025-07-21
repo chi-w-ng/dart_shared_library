@@ -23,7 +23,7 @@ bool init_dart() {
 
   //if package_config.json not exits run pub get
   _dart_isolate = DartDll_LoadScript("dart/main.dart",
-                                     "dart/.dart_tool/package_config.json");
+                                     "C:/GitHub/external_cpp/dart_shared_library/examples/realtime_example/dart/.dart_tool/package_config.json");
   if (_dart_isolate == nullptr) {
     return false;
   }
